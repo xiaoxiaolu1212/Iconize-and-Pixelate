@@ -1,124 +1,107 @@
-/* =========================================================
-   Iconize & Pixelate — minimal styles (DROP-IN)
-   Assumes a two-column layout:
-     .shell > .left (canvas) and .right (result + controls)
-   ========================================================= */
-
-:root {
-  --bg: #0f0f12;
-  --panel: #17171b;
-  --muted: #a1a1aa;
-  --text: #e5e7eb;
-  --brand: #3b82f6;
-  --border: #2a2b33;
+:root{
+  --bg:#0f0f12;
+  --panel:#17171b;
+  --text:#e5e7eb;
+  --muted:#a1a1aa;
+  --brand:#3b82f6;
+  --border:#2a2b33;
+  --ok:#16a34a;
+  --warn:#f59e0b;
 }
 
-* { box-sizing: border-box; }
-html, body { height: 100%; }
-body {
-  margin: 0;
-  background: linear-gradient(120deg, #0b0b10, #101119);
-  color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial;
+*{ box-sizing:border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  background:linear-gradient(120deg,#0b0b10,#101119);
+  color:var(--text);
+  font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial;
 }
 
-.shell {
-  display: grid;
+.container{ max-width:1200px; margin:0 auto; padding:24px; }
+header h1{ margin:0 0 6px; font-size:28px; }
+header p{ margin:0 0 18px; color:var(--muted); }
+
+.main-content{
+  display:grid;
   grid-template-columns: 1fr 1fr;
-  gap: 28px;
-  padding: 28px;
-  max-width: 1300px;
-  margin: 0 auto;
+  gap:24px;
 }
 
-.left, .right { display: flex; flex-direction: column; gap: 16px; }
-
-/* Drawing area */
-.canvas-card {
-  background: #e5e7eb;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 12px;
+/* Left: canvas */
+.canvas-section{
+  background:#e5e7eb;
+  padding:16px;
+  border-radius:16px;
+  border:1px solid var(--border);
 }
-
-#pad {
-  /* JS sets DPR scaling; CSS size stays fixed to avoid pointer offset */
-  width: 512px;
-  height: 512px;
-  display: block;
-  background: #fff;
-  border: 1px solid #000;
-  touch-action: none; /* prevents scroll on touch while drawing */
-  border-radius: 4px;
+.canvas-section h2{ color:#111; margin-top:0; }
+#drawingCanvas{
+  width:400px; /* JS handles DPR; keep this the visible size */
+  height:400px;
+  display:block;
+  background:#fff;
+  border:1px solid #000;
+  border-radius:4px;
+  touch-action:none; /* prevent scroll while drawing on touch */
+  margin-bottom:10px;
 }
+.canvas-controls{ display:flex; gap:10px; margin-bottom:8px; }
+.action-buttons{ display:flex; gap:10px; }
 
-.tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-top: 10px;
+/* Right: result + controls */
+.result-section{
+  background:var(--panel);
+  padding:16px;
+  border-radius:16px;
+  border:1px solid #22232a;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
 }
-.tools input[type="range"] { width: 160px; }
+.result-section h2{ margin:0; }
+.result-container{
+  background:#fff;
+  border:3px solid #000;
+  border-radius:6px;
+  min-height:400px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+}
+.result-image{ max-width:100%; max-height:100%; object-fit:contain; }
+.placeholder{ color:#555; }
 
-.actions { display: flex; gap: 12px; align-items: center; }
-.hint { color: #c1c4ce; font-size: 12px; }
+.controls-panel{
+  background:#101116;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px;
+}
+.controls-panel h3{ margin:0 0 10px; }
+.control-group{ display:flex; align-items:center; gap:10px; margin:6px 0; }
+.control-group input[type="range"]{ flex:1; }
 
 /* Buttons */
-button {
-  background: #101116;
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 10px 14px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-weight: 600;
+.btn{
+  border:1px solid var(--border);
+  background:#14151b;
+  color:var(--text);
+  padding:10px 14px;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:600;
 }
-button.primary, .is-active { background: var(--brand); border-color: var(--brand); }
+.btn-primary{ background:var(--brand); border-color:var(--brand); }
+.btn-secondary{ background:#0f1116; }
+.btn-success{ background:var(--ok); border-color:var(--ok); }
 
-/* Result panel */
-.result-wrap {
-  background: var(--panel);
-  border: 1px solid #22232a;
-  border-radius: 16px;
-  padding: 16px;
-  display: flex;
-  gap: 16px;
-  min-height: 560px;
+.download-section{ margin-top:6px; }
+
+@media (max-width: 960px){
+  .main-content{ grid-template-columns: 1fr; }
+  #drawingCanvas{ width:100%; height:auto; }
 }
 
-.result-frame {
-  flex: 1;
-  background: #fff;
-  border: 3px solid #000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  min-height: 512px;
-}
-
-.result-frame img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.controls {
-  width: 320px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-summary { cursor: pointer; color: #eaeefb; font-weight: 600; margin-bottom: 6px; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; align-items: center; }
-.grid output { justify-self: end; }
-
-@media (max-width: 980px) {
-  .shell { grid-template-columns: 1fr; }
-  #pad { width: 100%; height: auto; } /* still works since JS maps coords from rect */
-  .controls { width: 100%; }
-  .result-wrap { flex-direction: column; }
-}
 
