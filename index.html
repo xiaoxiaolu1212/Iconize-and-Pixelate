@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iconize and Pixelate</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 Iconize and Pixelate</h1>
+            <p>Draw your sketch and transform it into an icon or pixel art!</p>
+        </header>
+        
+        <div class="main-content">
+            <!-- Left side: Drawing Canvas -->
+            <div class="canvas-section">
+                <h2>Draw Your Sketch</h2>
+                <canvas id="drawingCanvas" width="400" height="400"></canvas>
+                <div class="canvas-controls">
+                    <button id="clearCanvas" class="btn btn-secondary">Clear Canvas</button>
+                </div>
+                <div class="action-buttons">
+                    <button id="iconizeBtn" class="btn btn-primary">Iconize</button>
+                    <button id="pixelateBtn" class="btn btn-primary">Pixelate</button>
+                </div>
+            </div>
+            
+            <!-- Right side: Result and Controls -->
+            <div class="result-section">
+                <h2>Result</h2>
+                <div id="resultContainer" class="result-container">
+                    <p class="placeholder">Your processed image will appear here</p>
+                </div>
+                
+                <!-- Iconize Controls -->
+                <div id="iconizeControls" class="controls-panel" style="display: none;">
+                    <h3>Iconize Settings</h3>
+                    <div class="control-group">
+                        <label for="thresholdSlider">Threshold (0-255):</label>
+                        <input type="range" id="thresholdSlider" min="0" max="255" value="128">
+                        <span id="thresholdValue">128</span>
+                    </div>
+                    <div class="control-group">
+                        <label for="strokeSlider">Stroke Size (0-8):</label>
+                        <input type="range" id="strokeSlider" min="0" max="8" value="2">
+                        <span id="strokeValue">2</span>
+                    </div>
+                    <div class="control-group">
+                        <label for="colorPicker">Color:</label>
+                        <input type="color" id="colorPicker" value="#000000">
+                    </div>
+                    <div class="control-group">
+                        <label for="backgroundPicker">Background:</label>
+                        <input type="color" id="backgroundPicker" value="#FFFFFF">
+                    </div>
+                </div>
+                
+                <!-- Pixelate Controls -->
+                <div id="pixelateControls" class="controls-panel" style="display: none;">
+                    <h3>Pixelate Settings</h3>
+                    <div class="control-group">
+                        <label for="paletteSlider">Palette Size (2-32):</label>
+                        <input type="range" id="paletteSlider" min="2" max="32" value="8">
+                        <span id="paletteValue">8</span>
+                    </div>
+                    <div class="control-group">
+                        <label for="pixelSlider">Pixel Size (2-32):</label>
+                        <input type="range" id="pixelSlider" min="2" max="32" value="8">
+                        <span id="pixelValue">8</span>
+                    </div>
+                    <div class="control-group">
+                        <label for="ditheringCheckbox">Dithering:</label>
+                        <input type="checkbox" id="ditheringCheckbox">
+                    </div>
+                </div>
+                
+                <div class="download-section">
+                    <button id="downloadBtn" class="btn btn-success" style="display: none;">Download Result</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

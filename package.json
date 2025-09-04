@@ -1,0 +1,13 @@
+{
+  "name": "iconize-and-pixelate",
+  "version": "1.0.0",
+  "description": "A project for icon creation and pixel art processing",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "keywords": ["icon", "pixel", "art", "image", "processing"],
+  "author": "",
+  "license": "MIT"
+}
