@@ -1,236 +1,145 @@
-class DrawingApp {
-    constructor() {
-        this.canvas = document.getElementById('drawingCanvas');
-        this.ctx = this.canvas.getContext('2d');
-        this.isDrawing = false;
-        this.currentResult = null;
-        
-        this.initializeCanvas();
-        this.setupEventListeners();
-        this.setupSliders();
-    }
-    
-    initializeCanvas() {
-        // Set canvas background to white
-        this.ctx.fillStyle = 'white';
-        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-        
-        // Set drawing properties
-        this.ctx.strokeStyle = '#000000';
-        this.ctx.lineWidth = 3;
-        this.ctx.lineCap = 'round';
-        this.ctx.lineJoin = 'round';
-    }
-    
-    setupEventListeners() {
-        // Canvas drawing events
-        this.canvas.addEventListener('mousedown', this.startDrawing.bind(this));
-        this.canvas.addEventListener('mousemove', this.draw.bind(this));
-        this.canvas.addEventListener('mouseup', this.stopDrawing.bind(this));
-        this.canvas.addEventListener('mouseout', this.stopDrawing.bind(this));
-        
-        // Touch events for mobile
-        this.canvas.addEventListener('touchstart', this.handleTouch.bind(this));
-        this.canvas.addEventListener('touchmove', this.handleTouch.bind(this));
-        this.canvas.addEventListener('touchend', this.stopDrawing.bind(this));
-        
-        // Button events
-        document.getElementById('clearCanvas').addEventListener('click', this.clearCanvas.bind(this));
-        document.getElementById('iconizeBtn').addEventListener('click', () => this.processImage('iconize'));
-        document.getElementById('pixelateBtn').addEventListener('click', () => this.processImage('pixelate'));
-        document.getElementById('downloadBtn').addEventListener('click', this.downloadResult.bind(this));
-    }
-    
-    setupSliders() {
-        // Iconize sliders
-        const thresholdSlider = document.getElementById('thresholdSlider');
-        const strokeSlider = document.getElementById('strokeSlider');
-        const paletteSlider = document.getElementById('paletteSlider');
-        const pixelSlider = document.getElementById('pixelSlider');
-        
-        thresholdSlider.addEventListener('input', (e) => {
-            document.getElementById('thresholdValue').textContent = e.target.value;
-        });
-        
-        strokeSlider.addEventListener('input', (e) => {
-            document.getElementById('strokeValue').textContent = e.target.value;
-        });
-        
-        paletteSlider.addEventListener('input', (e) => {
-            document.getElementById('paletteValue').textContent = e.target.value;
-        });
-        
-        pixelSlider.addEventListener('input', (e) => {
-            document.getElementById('pixelValue').textContent = e.target.value;
-        });
-    }
-    
-    startDrawing(e) {
-        this.isDrawing = true;
-        const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, y);
-    }
-    
-    draw(e) {
-        if (!this.isDrawing) return;
-        
-        const rect = this.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        
-        this.ctx.lineTo(x, y);
-        this.ctx.stroke();
-    }
-    
-    stopDrawing() {
-        this.isDrawing = false;
-        this.ctx.beginPath();
-    }
-    
-    handleTouch(e) {
-        e.preventDefault();
-        const touch = e.touches[0];
-        const mouseEvent = new MouseEvent(e.type === 'touchstart' ? 'mousedown' : 
-                                        e.type === 'touchmove' ? 'mousemove' : 'mouseup', {
-            clientX: touch.clientX,
-            clientY: touch.clientY
-        });
-        this.canvas.dispatchEvent(mouseEvent);
-    }
-    
-    clearCanvas() {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        this.initializeCanvas();
-        this.hideResult();
-    }
-    
-    async processImage(mode) {
-        // Check if canvas has content
-        const imageData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
-        const hasContent = imageData.data.some((value, index) => {
-            if (index % 4 === 3) return false; // Skip alpha channel
-            return value !== 255; // Not white
-        });
-        
-        if (!hasContent) {
-            alert('Please draw something on the canvas first!');
-            return;
-        }
-        
-        this.showLoading();
-        
-        try {
-            // Convert canvas to blob
-            const blob = await this.canvasToBlob();
-            
-            // Create form data
-            const formData = new FormData();
-            formData.append('file', blob, 'sketch.png');
-            
-            // Add parameters based on mode
-            if (mode === 'iconize') {
-                formData.append('threshold', document.getElementById('thresholdSlider').value);
-                formData.append('stroke_size', document.getElementById('strokeSlider').value);
-                formData.append('color', document.getElementById('colorPicker').value);
-                formData.append('background', document.getElementById('backgroundPicker').value);
-            } else if (mode === 'pixelate') {
-                formData.append('palette_size', document.getElementById('paletteSlider').value);
-                formData.append('pixel_size', document.getElementById('pixelSlider').value);
-                formData.append('dithering', document.getElementById('ditheringCheckbox').checked);
-            }
-            
-            // Send request to API
-            const response = await fetch(`/${mode}`, {
-                method: 'POST',
-                body: formData
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            // Get the result image
-            const resultBlob = await response.blob();
-            this.currentResult = resultBlob;
-            
-            // Display result
-            this.displayResult(resultBlob);
-            this.showControls(mode);
-            
-        } catch (error) {
-            console.error('Error processing image:', error);
-            alert('Error processing image. Please try again.');
-        } finally {
-            this.hideLoading();
-        }
-    }
-    
-    canvasToBlob() {
-        return new Promise((resolve) => {
-            this.canvas.toBlob(resolve, 'image/png');
-        });
-    }
-    
-    displayResult(blob) {
-        const resultContainer = document.getElementById('resultContainer');
-        const url = URL.createObjectURL(blob);
-        
-        resultContainer.innerHTML = `<img src="${url}" alt="Processed result">`;
-        document.getElementById('downloadBtn').style.display = 'block';
-    }
-    
-    showControls(mode) {
-        // Hide all control panels
-        document.getElementById('iconizeControls').style.display = 'none';
-        document.getElementById('pixelateControls').style.display = 'none';
-        
-        // Show relevant control panel
-        if (mode === 'iconize') {
-            document.getElementById('iconizeControls').style.display = 'block';
-        } else if (mode === 'pixelate') {
-            document.getElementById('pixelateControls').style.display = 'block';
-        }
-    }
-    
-    hideResult() {
-        const resultContainer = document.getElementById('resultContainer');
-        resultContainer.innerHTML = '<p class="placeholder">Your processed image will appear here</p>';
-        document.getElementById('downloadBtn').style.display = 'none';
-        document.getElementById('iconizeControls').style.display = 'none';
-        document.getElementById('pixelateControls').style.display = 'none';
-        this.currentResult = null;
-    }
-    
-    showLoading() {
-        const resultContainer = document.getElementById('resultContainer');
-        resultContainer.innerHTML = '<div class="loading show">Processing your image...</div>';
-    }
-    
-    hideLoading() {
-        const loading = document.querySelector('.loading');
-        if (loading) {
-            loading.classList.remove('show');
-        }
-    }
-    
-    downloadResult() {
-        if (!this.currentResult) return;
-        
-        const url = URL.createObjectURL(this.currentResult);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'processed-image.png';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    }
-}
+/* =========================================================
+   Iconize & Pixelate — Drawing Pad + API wiring (DROP-IN)
+   Requirements in your HTML (by id):
+     - <canvas id="pad"></canvas>
+     - Buttons: #draw #erase #clear #doIcon #doPixel (optional #download)
+     - Sliders/inputs (optional but supported):
+         #size (brush px)
+         #fg (color), #bg (text), #th (0-255), #stroke (0-8)
+         #pal (2-32), #pix (2-32), #dither (select "true"/"false")
+     - Result image: <img id="out">
+   ========================================================= */
 
-// Initialize the app when the page loads
-document.addEventListener('DOMContentLoaded', () => {
-    new DrawingApp();
-});
+(() => {
+  // ---------- Config ----------
+  const LOGICAL_SIZE = 512;      // logical drawing units (square canvas)
+  const API_BASE = "";           // same-origin; set to "https://your-api" if needed
+
+  // ---------- Elements ----------
+  const pad = document.getElementById("pad");
+  if (!pad) {
+    console.error("Missing <canvas id='pad'> in your HTML.");
+    return;
+  }
+  const ctx = pad.getContext("2d", { willReadFrequently: true });
+
+  const btnDraw   = document.getElementById("draw");
+  const btnErase  = document.getElementById("erase");
+  const btnClear  = document.getElementById("clear");
+  const btnIcon   = document.getElementById("doIcon");
+  const btnPixel  = document.getElementById("doPixel");
+  const btnDl     = document.getElementById("download"); // optional
+
+  const sizeEl    = document.getElementById("size");
+
+  // Icon controls (optional)
+  const fgEl      = document.getElementById("fg");
+  const bgEl      = document.getElementById("bg");
+  const thEl      = document.getElementById("th");
+  const strokeEl  = document.getElementById("stroke");
+
+  // Pixel controls (optional)
+  const palEl     = document.getElementById("pal");
+  const pixEl     = document.getElementById("pix");
+  const ditherEl  = document.getElementById("dither");
+
+  const outImg    = document.getElementById("out");
+
+  // ---------- Canvas sizing (DPR-aware; fixes cursor offset) ----------
+  function fitCanvasToDisplaySize() {
+    const dpr = window.devicePixelRatio || 1;
+
+    // CSS size (how big it looks)
+    pad.style.width  = LOGICAL_SIZE + "px";
+    pad.style.height = LOGICAL_SIZE + "px";
+
+    // Internal bitmap size (real pixels)
+    const targetW = Math.floor(LOGICAL_SIZE * dpr);
+    const targetH = Math.floor(LOGICAL_SIZE * dpr);
+    if (pad.width !== targetW || pad.height !== targetH) {
+      pad.width = targetW;
+      pad.height = targetH;
+    }
+
+    // Scale back to logical units so lineWidth etc use "px" you expect
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  fitCanvasToDisplaySize();
+  window.addEventListener("resize", fitCanvasToDisplaySize);
+
+  // ---------- Initialize background ----------
+  function resetCanvas() {
+    // Fill background in device pixels (identity transform)
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, pad.width, pad.height);
+    ctx.restore();
+  }
+  resetCanvas();
+
+  // ---------- Drawing state ----------
+  let mode = "draw"; // 'draw' | 'erase'
+  let drawing = false;
+  let last = null;
+
+  function getPos(e) {
+    const r = pad.getBoundingClientRect();
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    const x = ((clientX - r.left) / r.width) * LOGICAL_SIZE;
+    const y = ((clientY - r.top) / r.height) * LOGICAL_SIZE;
+    return { x, y };
+  }
+
+  function strokeLine(a, b, color, width) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
+  function onStart(e) {
+    drawing = true;
+    last = getPos(e);
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (!drawing) return;
+    const p = getPos(e);
+    const w = Number(sizeEl?.value || 8);
+    const color = mode === "draw" ? "#000000" : "#ffffff";
+    strokeLine(last, p, color, w);
+    last = p;
+    e.preventDefault();
+  }
+  function onEnd() {
+    drawing = false;
+    last = null;
+  }
+
+  pad.addEventListener("mousedown", onStart);
+  pad.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", onEnd);
+
+  pad.addEventListener("touchstart", onStart, { passive: false });
+  pad.addEventListener("touchmove", onMove, { passive: false });
+  pad.addEventListener("touchend", onEnd);
+
+  // ---------- Tool buttons ----------
+  btnDraw && (btnDraw.onclick = () => {
+    mode = "draw";
+    btnDraw.classList.add("is-active");
+    btnErase?.classList.remove("is-active");
+  });
+
+  btnErase && (btnErase.onclick = () => {
+    mode = "erase";
+    btnErase.classList.add("is-active");
+    btnDraw
+
