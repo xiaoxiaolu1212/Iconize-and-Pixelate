@@ -1,136 +1,244 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from PIL import Image, ImageDraw, ImageFilter
-import numpy as np
-import io
-import os
+from fastapi import FastAPI, File, UploadFile, Form
+from fastapi.responses import Response, FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
+from io import BytesIO
+from pathlib import Path
 from typing import Optional
+import numpy as np
+from PIL import Image, ImageOps, ImageFilter, ImageChops
 
-app = FastAPI(title="Iconize and Pixelate API")
+# --------------------------------------------------------------------------------------
+# App setup
+# --------------------------------------------------------------------------------------
 
-# Serve static files (CSS, JS)
-app.mount("/static", StaticFiles(directory="."), name="static")
+app = FastAPI(title="Iconize & Pixelate API")
 
-@app.get("/", response_class=HTMLResponse)
-async def read_root():
-    """Serve the main HTML page"""
-    with open("index.html", "r") as f:
-        return HTMLResponse(content=f.read())
+# Allow cross-origin if you later host UI elsewhere; safe for same-origin too
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Resolve project root (folder that contains index.html, script.js, styles.css)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+INDEX_PATH = PROJECT_ROOT / "index.html"
+SCRIPT_PATH = PROJECT_ROOT / "script.js"
+STYLES_PATH = PROJECT_ROOT / "styles.css"
+
+# --------------------------------------------------------------------------------------
+# Utility helpers
+# --------------------------------------------------------------------------------------
+
+def pil_to_png_bytes(img: Image.Image) -> bytes:
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+def hex_or_none(s: Optional[str]) -> Optional[str]:
+    """Treat empty strings or 'transparent' (any case) as None."""
+    if not s:
+        return None
+    s = s.strip()
+    if s == "" or s.lower() == "transparent":
+        return None
+    return s
+
+# --- Iconize pipeline ---------------------------------------------------------------
+
+def to_grayscale(img: Image.Image) -> Image.Image:
+    return ImageOps.grayscale(img)
+
+def binarize(img: Image.Image, threshold: int = 200) -> Image.Image:
+    """
+    Return L-mode mask with 0 for black (ink) and 255 for white (background).
+    """
+    g = to_grayscale(img)
+    return g.point(lambda p: 255 if p > threshold else 0, mode="L")
+
+def smooth_edges(mask: Image.Image, radius: float = 1.2) -> Image.Image:
+    blurred = mask.filter(ImageFilter.GaussianBlur(radius))
+    return blurred.point(lambda p: 255 if p > 127 else 0).convert("L")
+
+def thicken(mask: Image.Image, iterations: int = 1) -> Image.Image:
+    """
+    Simple morphological dilation: 3x3 max filter repeated 'iterations' times.
+    Input and output are L-mode with 0/255 values.
+    """
+    arr = np.array(mask, dtype=np.uint8)
+    for _ in range(max(0, iterations)):
+        padded = np.pad(arr, 1, constant_values=0)
+        arr = np.maximum.reduce([
+            padded[0:-2, 0:-2], padded[0:-2, 1:-1], padded[0:-2, 2:],
+            padded[1:-1, 0:-2], padded[1:-1, 1:-1], padded[1:-1, 2:],
+            padded[2:,   0:-2], padded[2:,   1:-1], padded[2:,   2:]
+        ])
+    return Image.fromarray(arr, mode="L")
+
+def stroke_from_mask(mask: Image.Image, width: int = 2) -> Image.Image:
+    if width <= 0:
+        return Image.new("L", mask.size, 0)
+    outer = thicken(mask, iterations=max(1, width // 2))
+    inner = mask
+    return ImageChops.subtract(outer, inner)
+
+def flat_iconize(
+    img: Image.Image,
+    fg: str = "#111111",
+    bg: Optional[str] = None,
+    threshold: int = 200,
+    stroke_px: int = 0,
+) -> Image.Image:
+    """
+    Assumes black lines on white background.
+    Produces flat-colored RGBA with optional stroke and background.
+    """
+    mask = binarize(img, threshold=threshold)
+    mask = smooth_edges(mask, radius=1.2)
+    mask = thicken(mask, iterations=1)
+
+    W, H = img.size
+
+    # Our mask has 0 for ink (black), 255 for background (white).
+    # Convert to alpha where ink -> 255, background -> 0
+    alpha = mask.point(lambda p: 0 if p > 0 else 255)
+
+    fg_layer = Image.new("RGBA", (W, H), fg)
+    fg_layer.putalpha(alpha)
+
+    base = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    if bg:
+        base = Image.new("RGBA", (W, H), bg)
+
+    if stroke_px > 0:
+        s = stroke_from_mask(mask, width=stroke_px)
+        s_alpha = s.point(lambda p: 255 if p > 0 else 0)
+        stroke_layer = Image.new("RGBA", (W, H), "#000000")
+        stroke_layer.putalpha(s_alpha)
+        base = Image.alpha_composite(base, stroke_layer)
+
+    out = Image.alpha_composite(base, fg_layer)
+    return out
+
+# --- Pixelate pipeline --------------------------------------------------------------
+
+def pixelate(
+    img: Image.Image,
+    palette_size: int = 8,
+    pixel_size: int = 8,
+    dither: bool = False,
+) -> Image.Image:
+    """
+    Quick, dependency-light pixelation:
+      1) Reduce palette with a 1-iteration k-means-lite.
+      2) Downscale with NEAREST and upscale back with NEAREST.
+      3) Optional dithering via P-mode conversion.
+    """
+    rgb = img.convert("RGB")
+    arr = np.array(rgb)
+    h, w, _ = arr.shape
+    flat = arr.reshape(-1, 3).astype(np.float32)
+
+    n = max(2, min(int(palette_size), flat.shape[0]))
+    rng = np.random.default_rng(42)
+    centers = flat[rng.choice(flat.shape[0], size=n, replace=False)]
+    # assign
+    dist = ((flat[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+    labels = dist.argmin(axis=1)
+    # update
+    for k in range(n):
+        pts = flat[labels == k]
+        if pts.size:
+            centers[k] = pts.mean(axis=0)
+
+    mapped = centers[labels].reshape(h, w, 3).astype(np.uint8)
+    pal_img = Image.fromarray(mapped, mode="RGB")
+
+    # chunky pixels
+    down_w = max(1, w // int(pixel_size))
+    down_h = max(1, h // int(pixel_size))
+    down = pal_img.resize((down_w, down_h), Image.NEAREST)
+    up = down.resize((w, h), Image.NEAREST)
+
+    if dither:
+        up = up.convert("P", palette=Image.ADAPTIVE, colors=n).convert("RGB")
+    return up
+
+# --------------------------------------------------------------------------------------
+# API routes
+# --------------------------------------------------------------------------------------
 
 @app.post("/iconize")
-async def iconize_image(
+async def iconize_endpoint(
     file: UploadFile = File(...),
-    threshold: int = Form(128),
-    stroke_size: int = Form(2),
-    color: str = Form("#000000"),
-    background: str = Form("#FFFFFF")
+    fg_color: str = Form("#111111"),
+    bg_color: str = Form(""),
+    threshold: int = Form(200),
+    stroke_px: int = Form(0),
 ):
-    """Convert sketch to icon with threshold, stroke, and color fill"""
+    """
+    Form fields expected by your frontend:
+      - fg_color (hex), bg_color (hex or empty string for transparent)
+      - threshold (0..255), stroke_px (0..8)
+    """
     try:
-        # Read and process the image
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGBA")
-        
-        # Convert to grayscale for threshold
-        gray = image.convert("L")
-        
-        # Apply threshold
-        thresholded = gray.point(lambda x: 255 if x > threshold else 0, mode="1")
-        thresholded = thresholded.convert("RGBA")
-        
-        # Create new image with background color
-        result = Image.new("RGBA", image.size, background)
-        
-        # Convert color hex to RGB
-        color_rgb = tuple(int(color[i:i+2], 16) for i in (1, 3, 5))
-        
-        # Apply stroke and fill
-        if stroke_size > 0:
-            # Create stroke by dilating the thresholded image
-            stroke_img = Image.new("RGBA", image.size, (0, 0, 0, 0))
-            draw = ImageDraw.Draw(stroke_img)
-            
-            # Get the outline of the thresholded image
-            outline = thresholded.filter(ImageFilter.FIND_EDGES)
-            outline = outline.convert("RGBA")
-            
-            # Apply stroke
-            for y in range(image.height):
-                for x in range(image.width):
-                    if outline.getpixel((x, y))[3] > 0:
-                        # Draw stroke around this pixel
-                        for dy in range(-stroke_size, stroke_size + 1):
-                            for dx in range(-stroke_size, stroke_size + 1):
-                                if 0 <= x + dx < image.width and 0 <= y + dy < image.height:
-                                    if dx*dx + dy*dy <= stroke_size*stroke_size:
-                                        result.putpixel((x + dx, y + dy), color_rgb + (255,))
-        
-        # Fill the main shape
-        for y in range(image.height):
-            for x in range(image.width):
-                if thresholded.getpixel((x, y))[0] == 0:  # Black pixel in thresholded
-                    result.putpixel((x, y), color_rgb + (255,))
-        
-        # Convert to PNG and return
-        output = io.BytesIO()
-        result.save(output, format="PNG")
-        output.seek(0)
-        
-        return FileResponse(
-            io.BytesIO(output.getvalue()),
-            media_type="image/png",
-            filename="iconized.png"
+        data = await file.read()
+        img = Image.open(BytesIO(data))
+        out = flat_iconize(
+            img,
+            fg=fg_color,
+            bg=hex_or_none(bg_color),
+            threshold=int(threshold),
+            stroke_px=int(stroke_px),
         )
-        
+        return Response(content=pil_to_png_bytes(out), media_type="image/png")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return PlainTextResponse(str(e), status_code=400)
 
 @app.post("/pixelate")
-async def pixelate_image(
+async def pixelate_endpoint(
     file: UploadFile = File(...),
     palette_size: int = Form(8),
     pixel_size: int = Form(8),
-    dithering: bool = Form(False)
+    dither: str = Form("false"),  # "true" | "false"
 ):
-    """Convert sketch to pixel art with reduced palette and pixelation"""
+    """
+    Form fields expected by your frontend:
+      - palette_size (2..32), pixel_size (2..32), dither ("true"/"false")
+    """
     try:
-        # Read and process the image
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-        
-        # Resize to smaller size for pixelation
-        small_size = (image.width // pixel_size, image.height // pixel_size)
-        small_image = image.resize(small_size, Image.NEAREST)
-        
-        # Reduce palette
-        if dithering:
-            # Apply Floyd-Steinberg dithering
-            small_image = small_image.quantize(colors=palette_size, method=Image.MEDIANCUT)
-        else:
-            # Simple palette reduction
-            small_image = small_image.quantize(colors=palette_size, method=Image.MEDIANCUT)
-        
-        # Convert back to RGB
-        small_image = small_image.convert("RGB")
-        
-        # Scale back up with nearest neighbor
-        result = small_image.resize(image.size, Image.NEAREST)
-        
-        # Convert to PNG and return
-        output = io.BytesIO()
-        result.save(output, format="PNG")
-        output.seek(0)
-        
-        return FileResponse(
-            io.BytesIO(output.getvalue()),
-            media_type="image/png",
-            filename="pixelated.png"
+        data = await file.read()
+        img = Image.open(BytesIO(data))
+        out = pixelate(
+            img,
+            palette_size=int(palette_size),
+            pixel_size=int(pixel_size),
+            dither=str(dither).lower() == "true",
         )
-        
+        return Response(content=pil_to_png_bytes(out), media_type="image/png")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return PlainTextResponse(str(e), status_code=400)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# --------------------------------------------------------------------------------------
+# Frontend routes (serve your existing files at same origin)
+# --------------------------------------------------------------------------------------
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    if INDEX_PATH.exists():
+        return FileResponse(INDEX_PATH)
+    return HTMLResponse("<h1>Index not found</h1>", status_code=404)
+
+@app.get("/styles.css")
+def styles():
+    if STYLES_PATH.exists():
+        return FileResponse(STYLES_PATH, media_type="text/css")
+    return PlainTextResponse("styles.css not found", status_code=404)
+
+@app.get("/script.js")
+def script():
+    if SCRIPT_PATH.exists():
+        return FileResponse(SCRIPT_PATH, media_type="application/javascript")
+    return PlainTextResponse("script.js not found", status_code=404)
+
